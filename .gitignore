@@ -1,7 +1,10 @@
 # Project context 
-data/
-output_data/
-output_images/
+data/*
+!data/.gitkeep
+output_data/*
+!output_data/.gitkeep
+output_images/*
+!output_images/.gitkeep
 TODOs.md 
 
 .vscode/
