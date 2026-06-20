@@ -1,0 +1,79 @@
+import logging
+import os
+import xarray as xr
+import config as cfg
+from data_processor import OceanDataProcessor
+import plotter
+
+
+def configure_logging():
+    logging.basicConfig(
+        level=logging.WARNING,
+        format='%(message)s',
+        handlers=[logging.StreamHandler()]
+    )
+
+
+def check_optional_dependencies():
+    try:
+        import bottleneck  # noqa: F401
+    except ModuleNotFoundError:
+        logging.warning(
+            'Optional package bottleneck is missing. Install it with "pip install bottleneck" '
+            'to avoid xarray/dask import issues during reductions.'
+        )
+
+
+def main():
+    configure_logging()
+    check_optional_dependencies()
+    logger = logging.getLogger(__name__)
+    # 1. Setup Directories
+    os.makedirs(cfg.IMAGE_OUT_DIR, exist_ok=True)
+    os.makedirs(cfg.DATA_OUT_DIR, exist_ok=True)
+
+    logger.warning('Starting ocean analysis...')
+    processor = OceanDataProcessor(cfg.CMEMS_FILES, cfg.GEBCO_FILE)
+    lon_bathy, lat_bathy, elevation = processor.process_bathymetry()
+    
+    # Define bounding box based on ocean data extent
+    lon_ocean = processor.ds_ocean.longitude.values
+    lat_ocean = processor.ds_ocean.latitude.values
+    extent = [lon_ocean.min(), lon_ocean.max(), lat_ocean.min(), lat_ocean.max()]
+
+    bottom_data, bottom_depth = processor.get_bottom_currents(cfg.MONTH_START, cfg.MONTH_END)
+    currents_data = processor.get_depth_averaged_currents(
+        cfg.DEPTH_UP, cfg.DEPTH_DOWN, cfg.MONTH_START, cfg.MONTH_END
+    )
+
+    # Resolve actual bottom matrix for plotting (using minimum of stated depth or actual bottom)
+    # Replicates MATLAB: depthdownM=min(depthdown,bottomdepth)
+    depth_down_matrix = xr.where(bottom_depth < cfg.DEPTH_DOWN, bottom_depth, cfg.DEPTH_DOWN)
+
+    plotter.create_bathymetry_plot(
+        lon_bathy, lat_bathy, elevation, 
+        bottom_depth, depth_down_matrix, 
+        extent, cfg.IMAGE_OUT_DIR
+    )
+
+    # Take the mean across the time dimension
+    bottom_mean = bottom_data.mean(dim='time', skipna=True)
+    currents_mean = currents_data.mean(dim='time', skipna=True)
+    
+    plotter.create_velocity_plot(
+        currents_mean, bottom_mean, 
+        lon_bathy, lat_bathy, elevation, 
+        extent, cfg.SPATIAL_STEP, 'fig2_mean_velocity.png', cfg.IMAGE_OUT_DIR
+    )
+
+    out_path = os.path.join(cfg.DATA_OUT_DIR, 'MeanVel.csv')
+    processor.export_to_csv(bottom_data, currents_data, bottom_depth, out_path)
+
+    logger.warning('Analysis complete!')
+
+if __name__ == "__main__":
+    try:
+        main()
+    except Exception:
+        logging.exception('Unhandled exception during main execution')
+        raise

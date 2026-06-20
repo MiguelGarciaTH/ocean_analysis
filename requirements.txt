@@ -1,0 +1,9 @@
+numpy
+pandas
+matplotlib
+xarray
+netCDF4
+dask
+bottleneck
+cmcrameri
+pillow
