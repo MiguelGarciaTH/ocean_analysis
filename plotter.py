@@ -22,7 +22,9 @@ def get_safe_cmap(cmap_name):
 # Colormap padrão para a Análise de Mapa
 DEFAULT_CMAP = get_safe_cmap('lapaz')
 
-def create_bathymetry_plot(lon_bathy, lat_bathy, elevation, bottom_depth, depth_down_matrix, extent, out_dir):
+def create_bathymetry_plot(lon_bathy, lat_bathy, elevation, bottom_depth, depth_down_matrix, extent, out_dir,
+                           month_start=None, month_end=None, depth_shallow_m=None, depth_deep_m=None,
+                           analysis_type=None):
     """Replicates Figure 1: Bathymetry and Depth analysis."""
     fig, axes = plt.subplots(1, 3, figsize=(18, 6))
     levels = [-5000, -2000, -200, 0]
@@ -49,10 +51,34 @@ def create_bathymetry_plot(lon_bathy, lat_bathy, elevation, bottom_depth, depth_
     ax.axis(extent)
 
     plt.tight_layout()
-    plt.savefig(os.path.join(out_dir, 'fig1_bathymetry_depths.png'), dpi=300)
+    # Add metadata box (months, depth range, analysis type) — show as subdued text
+    meta_lines = []
+    if month_start is not None and month_end is not None:
+        meta_lines.append(f'Months: {month_start}-{month_end}')
+    if depth_shallow_m is not None and depth_deep_m is not None:
+        ds_shallow = int(min(abs(depth_shallow_m), abs(depth_deep_m)))
+        ds_deep = int(max(abs(depth_shallow_m), abs(depth_deep_m)))
+        meta_lines.append(f'Depths (m below surface): {ds_shallow} to {ds_deep}')
+    if analysis_type:
+        meta_lines.append(f'Analysis: {analysis_type}')
+    if meta_lines:
+        meta_text = '\n'.join(meta_lines)
+        # place at bottom-left, small gray text with lower opacity so it doesn't overpower the plot
+        fig.text(0.02, 0.02, meta_text, ha='left', va='bottom', fontsize=7, color='gray',
+                 bbox=dict(facecolor='white', alpha=0.5, edgecolor='none'))
+    # Build filename with metadata if available
+    if month_start is not None and month_end is not None and depth_shallow_m is not None and depth_deep_m is not None:
+        ds_shallow = int(min(abs(depth_shallow_m), abs(depth_deep_m)))
+        ds_deep = int(max(abs(depth_shallow_m), abs(depth_deep_m)))
+        fname = f"bathymetry_months_{month_start}-{month_end}_depth_{ds_shallow}-{ds_deep}.png"
+    else:
+        fname = 'fig1_bathymetry_depths.png'
+    plt.savefig(os.path.join(out_dir, fname), dpi=300)
     plt.close()
 
-def create_velocity_plot(ds_currents, ds_bottom, lon_bathy, lat_bathy, elevation, extent, step, filename, out_dir, vmax=0.55):
+def create_velocity_plot(ds_currents, ds_bottom, lon_bathy, lat_bathy, elevation, extent, step, filename, out_dir,
+                         vmax=0.55, month_start=None, month_end=None, depth_shallow_m=None,
+                         depth_deep_m=None, analysis_type=None):
     """Replicates Figures 2 & 3: Quiver and magnitude plots for currents."""
     fig, axes = plt.subplots(1, 2, figsize=(14, 6))
     
@@ -108,10 +134,33 @@ def create_velocity_plot(ds_currents, ds_bottom, lon_bathy, lat_bathy, elevation
     ax.axis(extent)
 
     plt.tight_layout()
-    plt.savefig(os.path.join(out_dir, filename), dpi=300)
+    # Add metadata box (subdued)
+    meta_lines = []
+    if month_start is not None and month_end is not None:
+        meta_lines.append(f'Months: {month_start}-{month_end}')
+    if depth_shallow_m is not None and depth_deep_m is not None:
+        ds_shallow = int(min(abs(depth_shallow_m), abs(depth_deep_m)))
+        ds_deep = int(max(abs(depth_shallow_m), abs(depth_deep_m)))
+        meta_lines.append(f'Depths (m below surface): {ds_shallow} to {ds_deep}')
+    if analysis_type:
+        meta_lines.append(f'Analysis: {analysis_type}')
+    if meta_lines:
+        meta_text = '\n'.join(meta_lines)
+        fig.text(0.02, 0.02, meta_text, ha='left', va='bottom', fontsize=7, color='gray',
+                 bbox=dict(facecolor='white', alpha=0.5, edgecolor='none'))
+
+    # Build a clear, human-readable filename for velocity outputs
+    if month_start is not None and month_end is not None and depth_shallow_m is not None and depth_deep_m is not None:
+        ds_shallow = int(min(abs(depth_shallow_m), abs(depth_deep_m)))
+        ds_deep = int(max(abs(depth_shallow_m), abs(depth_deep_m)))
+        ds = f"mean_velocity_months_{month_start}-{month_end}_depth_{ds_shallow}-{ds_deep}.png"
+    else:
+        ds = filename or 'fig2_mean_velocity.png'
+    plt.savefig(os.path.join(out_dir, ds), dpi=300)
     plt.close()
 
-def create_section_plots(processor, coord_beg, coord_end, month_start, month_end, out_dir, cmap_name='lapaz'):
+def create_section_plots(processor, coord_beg, coord_end, month_start, month_end, out_dir, cmap_name='lapaz',
+                         depth_shallow_m=None, depth_deep_m=None, analysis_type=None):
     """Create section plots between coord_beg and coord_end with a mini-map inset."""
     ds = processor._filter_by_month_interval(month_start, month_end)
 
@@ -258,6 +307,25 @@ def create_section_plots(processor, coord_beg, coord_end, month_start, month_end
     ax.set_title('velocity direction (°N)', fontweight='bold')
 
     plt.tight_layout()
-    outpath = os.path.join(out_dir, 'section_time_mean.png')
+    # Add metadata box (subdued)
+    meta_lines = []
+    if month_start is not None and month_end is not None:
+        meta_lines.append(f'Months: {month_start}-{month_end}')
+    if depth_shallow_m is not None and depth_deep_m is not None:
+        ds_shallow = int(min(abs(depth_shallow_m), abs(depth_deep_m)))
+        ds_deep = int(max(abs(depth_shallow_m), abs(depth_deep_m)))
+        meta_lines.append(f'Depths (m below surface): {ds_shallow} to {ds_deep}')
+    if analysis_type:
+        meta_lines.append(f'Analysis: {analysis_type}')
+    if meta_lines:
+        meta_text = '\n'.join(meta_lines)
+        fig.text(0.02, 0.02, meta_text, ha='left', va='bottom', fontsize=7, color='gray',
+                 bbox=dict(facecolor='white', alpha=0.5, edgecolor='none'))
+
+    # Filename with metadata
+    if month_start is not None and month_end is not None and depth_shallow_m is not None and depth_deep_m is not None:
+        outpath = os.path.join(out_dir, f"section_time_mean_{month_start}-{month_end}_{int(depth_shallow_m)}-{int(depth_deep_m)}.png")
+    else:
+        outpath = os.path.join(out_dir, 'section_time_mean.png')
     plt.savefig(outpath, dpi=300)
     plt.close()

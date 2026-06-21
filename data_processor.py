@@ -1,6 +1,9 @@
 import xarray as xr
 import numpy as np
 import pandas as pd
+import logging
+
+logger = logging.getLogger(__name__)
 
 class OceanDataProcessor:
     def __init__(self, cmems_files, gebco_file):
@@ -60,9 +63,68 @@ class OceanDataProcessor:
         return bottom_data, bottom_depth
 
     def get_depth_averaged_currents(self, depth_up, depth_down, start_month=None, end_month=None):
-        """Average the currents across a specific depth slice and compute derived fields."""
+        """Average the currents across a specific depth slice and compute derived fields.
+
+        Parameters
+        - depth_up: shallow/top bound for the slice. Can be positive (interpreted as metres
+          below surface) or negative (dataset sign). The function normalizes the sign.
+        - depth_down: deep/bottom bound for the slice. Same sign handling as `depth_up`.
+        """
         ds = self._filter_by_month_interval(start_month, end_month)
-        ds_sliced = ds.sel(depth=slice(depth_up, depth_down))
+        # Handle datasets that use negative depths (e.g., bathymetry/elevation conventions)
+        depth_vals = ds.depth.values
+        # If depth coordinate is all non-positive, assume depths are negative (e.g., -10, -20...)
+        if np.all(depth_vals <= 0):
+            d_up = -abs(depth_up)
+            d_down = -abs(depth_down)
+        else:
+            d_up = depth_up
+            d_down = depth_down
+
+        # Select depth levels by magnitude (absolute depth from surface) so user inputs
+        # like 700..800 (meaning -700..-800) match dataset coordinates regardless of sign/order.
+        abs_depth_vals = np.abs(depth_vals)
+        low_mag = min(abs(d_up), abs(d_down))
+        high_mag = max(abs(d_up), abs(d_down))
+
+        # Find indices where absolute depth falls within requested bounds (inclusive)
+        idx = np.where((abs_depth_vals >= low_mag) & (abs_depth_vals <= high_mag))[0]
+        if idx.size > 0:
+            # Use .isel to select the discovered depth indices
+            ds_sliced = ds.isel(depth=idx)
+            selected_depths = depth_vals[idx]
+            logger.info(f'✓ Depth selection: requested {depth_up:.0f}–{depth_down:.0f}m below surface, selected {idx.size} depth levels from {float(selected_depths.min()):.1f} to {float(selected_depths.max()):.1f}m')
+        else:
+            # No exact magnitude match: expand to nearest available levels around the bounds
+            try:
+                # Try to use the actual sign convention of the dataset (positive or negative)
+                if np.all(depth_vals >= 0):
+                    # Positive depths: search for positive bounds
+                    nearest_low = float(ds.depth.sel(depth=low_mag, method='nearest'))
+                    nearest_high = float(ds.depth.sel(depth=high_mag, method='nearest'))
+                else:
+                    # Negative depths: search for negative bounds
+                    nearest_low = float(ds.depth.sel(depth=-low_mag, method='nearest'))
+                    nearest_high = float(ds.depth.sel(depth=-high_mag, method='nearest'))
+                # Ensure correct ordering for slice
+                start_bound = min(nearest_low, nearest_high)
+                stop_bound = max(nearest_low, nearest_high)
+                ds_sliced = ds.sel(depth=slice(start_bound, stop_bound))
+                logger.info(f'ℹ Depth selection: requested {depth_up:.0f}–{depth_down:.0f}m below surface, selected slice from {start_bound:.1f} to {stop_bound:.1f}m')
+            except Exception:
+                # As a last resort, pick the single nearest level to the midpoint
+                try:
+                    mid_mag = (low_mag + high_mag) / 2.0
+                    if np.all(depth_vals >= 0):
+                        nearest_mid = float(ds.depth.sel(depth=mid_mag, method='nearest'))
+                    else:
+                        nearest_mid = float(ds.depth.sel(depth=-mid_mag, method='nearest'))
+                    ds_sliced = ds.sel(depth=nearest_mid)
+                    logger.info(f'⚠ Depth selection: requested {depth_up:.0f}–{depth_down:.0f}m below surface, fell back to single nearest level: {nearest_mid:.1f}m')
+                except Exception:
+                    ds_sliced = ds
+                    logger.info(f'⚠ Depth selection: requested {depth_up:.0f}–{depth_down:.0f}m below surface, no valid depths found, using all depths')
+
         mean_currents = ds_sliced.mean(dim='depth', skipna=True)
         mean_currents['magn'], mean_currents['dir'] = self.calculate_magnitude_direction(
             mean_currents['uo'], mean_currents['vo']

@@ -106,10 +106,12 @@ class OceanAnalysisGUI(tk.Tk):
 
     def setup_logging(self):
         handler = GUILogHandler(self.log_text)
-        handler.setLevel(logging.WARNING)
-        formatter = logging.Formatter('[%(levelname)s] %(message)s')
+        handler.setLevel(logging.INFO)
+        formatter = logging.Formatter('%(message)s')
         handler.setFormatter(formatter)
         logger.addHandler(handler)
+        # Configure root logger to capture all INFO messages
+        logging.getLogger().setLevel(logging.INFO)
 
     def _create_button(self, parent, text, command, bg=None, hover=None):
         btn_bg = bg if bg else self.ACCENT
@@ -267,13 +269,13 @@ class OceanAnalysisGUI(tk.Tk):
         entry = self._create_entry(depth_frame, width=12)
         entry.insert(0, self.depth_up_var.get())
         entry.grid(row=0, column=1, sticky='w', padx=(0, 12))
-        entry.bind('<KeyRelease>', lambda e: self.depth_up_var.set(entry.get()))
+        entry.bind('<KeyRelease>', lambda e, ent=entry: self.depth_up_var.set(ent.get()))
 
         tk.Label(depth_frame, text='Lower limit:', bg=self.BG_SECONDARY, fg=self.TEXT_PRIMARY, font=('Segoe UI', 10)).grid(row=1, column=0, sticky='w', padx=12, pady=(0, 12))
         entry = self._create_entry(depth_frame, width=12)
         entry.insert(0, self.depth_down_var.get())
         entry.grid(row=1, column=1, sticky='w', padx=(0, 12))
-        entry.bind('<KeyRelease>', lambda e: self.depth_down_var.set(entry.get()))
+        entry.bind('<KeyRelease>', lambda e, ent=entry: self.depth_down_var.set(ent.get()))
 
         tk.Label(inner_frame, text='Month Interval (average across all years)', bg=self.BG_PRIMARY, fg=self.TEXT_PRIMARY, font=('Segoe UI', 11, 'bold')).pack(anchor='w', pady=(0, 10))
         month_frame = tk.Frame(inner_frame, bg=self.BG_SECONDARY)
@@ -901,8 +903,17 @@ class OceanAnalysisGUI(tk.Tk):
             depth_up, depth_down = float(self.depth_up_var.get()), float(self.depth_down_var.get())
         except ValueError:
             raise ValueError('Depth bounds must be numeric.')
-        if depth_up < 0 or depth_down < 0: raise ValueError('Depth values cannot be negative.')
-        if depth_up > depth_down: raise ValueError('Depth upper limit must be <= lower limit.')
+
+        # Accept either positive values (metres below surface) or negative dataset-style depths.
+        # Normalize for validation by comparing absolute depths (shallow <= deep).
+        if abs(depth_up) > abs(depth_down):
+            # If the user accidentally swapped bounds, swap them instead of failing.
+            logger.warning('Depth bounds were provided in reverse order; swapping them.')
+            depth_up, depth_down = depth_down, depth_up
+
+        # Return depths as positive metres below surface for downstream code compatibility
+        depth_up = abs(depth_up)
+        depth_down = abs(depth_down)
 
         try:
             month_start, month_end = int(self.month_start_var.get()), int(self.month_end_var.get())
@@ -977,7 +988,9 @@ class OceanAnalysisGUI(tk.Tk):
         plotter.create_section_plots(
             processor, coord_beg, coord_end,
             config['month_start'], config['month_end'],
-            config['output_image_dir'], cmap_name=self.selected_cmap
+            config['output_image_dir'], cmap_name=self.selected_cmap,
+            depth_shallow_m=config['depth_up'], depth_deep_m=config['depth_down'],
+            analysis_type='section_time_mean'
         )
 
         self.check_cancel()
@@ -1017,7 +1030,10 @@ class OceanAnalysisGUI(tk.Tk):
         plotter.create_bathymetry_plot(
             lon_bathy, lat_bathy, elevation,
             bottom_depth, depth_down_matrix,
-            extent, config['output_image_dir']
+            extent, config['output_image_dir'],
+            month_start=config['month_start'], month_end=config['month_end'],
+            depth_shallow_m=config['depth_up'], depth_deep_m=config['depth_down'],
+            analysis_type='bathymetry_depths'
         )
 
         self.check_cancel()
@@ -1027,7 +1043,10 @@ class OceanAnalysisGUI(tk.Tk):
         plotter.create_velocity_plot(
             currents_mean, bottom_mean,
             lon_bathy, lat_bathy, elevation,
-            extent, cfg.SPATIAL_STEP, 'fig2_mean_velocity.png', config['output_image_dir']
+            extent, cfg.SPATIAL_STEP, 'fig2_mean_velocity.png', config['output_image_dir'],
+            month_start=config['month_start'], month_end=config['month_end'],
+            depth_shallow_m=config['depth_up'], depth_deep_m=config['depth_down'],
+            analysis_type='mean_velocity'
         )
 
         self.check_cancel()
