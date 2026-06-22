@@ -96,6 +96,8 @@ class OceanAnalysisGUI(tk.Tk):
         self.setup_logging()
 
     def setup_theme(self):
+        # Default color tokens (used for non-ttk widgets and custom coloring)
+        # Start with dark defaults; we'll detect if the system is already in dark mode
         self.BG_PRIMARY = '#0d1117'
         self.BG_SECONDARY = '#161b22'
         self.BG_TERTIARY = '#21262d'
@@ -106,17 +108,86 @@ class OceanAnalysisGUI(tk.Tk):
         self.BORDER = '#30363d'
         self.DANGER = '#f85149'
         self.DANGER_HOVER = '#ff6a69'
-        
-        self.configure(bg=self.BG_PRIMARY)
-        
+
+        # Try to pick a native ttk theme based on the platform so the UI matches system look-and-feel.
         style = ttk.Style()
-        style.theme_use('clam')
-        
-        style.configure('TNotebook', background=self.BG_PRIMARY, borderwidth=0)
-        
-        style.configure('TNotebook.Tab', background=self.BG_SECONDARY, foreground=self.TEXT_SECONDARY, 
-                       padding=[20, 10], borderwidth=0, focuscolor=self.BG_PRIMARY)
-                       
+        # Detect system preference for dark mode where possible and choose an appropriate theme
+        dark_pref = False
+        try:
+            import platform as _platform
+            available = list(style.theme_names())
+            sys_name = (_platform.system() or '').lower()
+
+            # Platform-specific dark-mode detection
+            if sys_name == 'linux':
+                # Try GNOME settings via gsettings
+                try:
+                    import subprocess as _sub
+                    out = _sub.check_output(['gsettings', 'get', 'org.gnome.desktop.interface', 'color-scheme'], stderr=_sub.DEVNULL, text=True).strip()
+                    if 'dark' in out.lower():
+                        dark_pref = True
+                except Exception:
+                    try:
+                        out = _sub.check_output(['gsettings', 'get', 'org.gnome.desktop.interface', 'gtk-theme'], stderr=_sub.DEVNULL, text=True).strip().strip("'\n")
+                        if 'dark' in out.lower():
+                            dark_pref = True
+                    except Exception:
+                        pass
+
+                preferred = ['clam', 'alt', 'default']
+
+            elif sys_name == 'darwin':
+                # macOS dark mode: defaults read -g AppleInterfaceStyle -> 'Dark'
+                try:
+                    import subprocess as _sub
+                    out = _sub.check_output(['defaults', 'read', '-g', 'AppleInterfaceStyle'], stderr=_sub.DEVNULL, text=True).strip()
+                    if out.lower().startswith('dark'):
+                        dark_pref = True
+                except Exception:
+                    pass
+                preferred = ['aqua', 'clam', 'default']
+
+            elif sys_name == 'windows':
+                # Windows: registry AppsUseLightTheme == 0 -> dark
+                try:
+                    import subprocess as _sub
+                    out = _sub.check_output(['reg', 'query', r'HKCU\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize', '/v', 'AppsUseLightTheme'], stderr=_sub.DEVNULL, text=True)
+                    if '0x0' in out or '0x00000000' in out:
+                        dark_pref = True
+                except Exception:
+                    pass
+                preferred = ['vista', 'xpnative', 'alt', 'clam']
+            else:
+                preferred = ['clam', 'default']
+
+            # Choose the first available preferred theme
+            chosen = None
+            for t in preferred:
+                if t in available:
+                    chosen = t
+                    break
+            if chosen:
+                try:
+                    style.theme_use(chosen)
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
+        # If system prefers dark, ensure our tokens are dark (they already are by default).
+        if dark_pref:
+            # Slightly tweak accents for dark systems
+            self.ACCENT = '#3ea6ff'
+            self.ACCENT_HOVER = '#68b8ff'
+            self.TEXT_PRIMARY = '#e6eef8'
+            self.TEXT_SECONDARY = '#9aa6b2'
+
+        # Still configure some ttk element options to ensure consistent spacing and fonts
+        self.configure(bg=self.BG_PRIMARY)
+
+        style.configure('TNotebook', borderwidth=0)
+
+        style.configure('TNotebook.Tab', padding=[20, 10])
         style.map('TNotebook.Tab', 
                   background=[('selected', self.BG_PRIMARY), ('active', self.BG_TERTIARY)], 
                   foreground=[('selected', self.ACCENT), ('active', self.TEXT_PRIMARY)])
