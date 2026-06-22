@@ -35,10 +35,37 @@ except ModuleNotFoundError:
     pass
 
 try:
-    from cmcrameri import cm
-    CMAPS = {name: getattr(cm, name) for name in dir(cm) if not name.startswith('_') and name not in ['show_cmaps']}
-except ImportError:
-    CMAPS = {'viridis': 'viridis', 'plasma': 'plasma', 'inferno': 'inferno'}
+    from cmcrameri import cm as _cmcrameri
+    CRAMERI_MAPS = {name: getattr(_cmcrameri, name) for name in dir(_cmcrameri) if not name.startswith('_') and name not in ['show_cmaps']}
+except Exception:
+    CRAMERI_MAPS = {}
+
+# Build a combined mapping of display name -> cmap object/string, with source prefixes
+ALL_CMAPS = {}
+try:
+    import matplotlib.pyplot as _plt
+    mpl_names = list(_plt.colormaps()) if hasattr(_plt, 'colormaps') else list(_plt.cm.cmap_d.keys())
+except Exception:
+    mpl_names = ['viridis', 'plasma', 'inferno']
+
+# Add Crameri maps with prefix if available
+for name, cmap_obj in CRAMERI_MAPS.items():
+    disp = f"Crameri - {name}"
+    ALL_CMAPS[disp] = cmap_obj
+
+# Add Matplotlib maps with prefix (avoid duplicates)
+for name in sorted(set(mpl_names)):
+    disp = f"Matplotlib - {name}"
+    # store the name string; later resolved via plt.get_cmap if needed
+    ALL_CMAPS[disp] = name
+
+# If nothing found, fall back to a few sensible defaults
+if not ALL_CMAPS:
+    ALL_CMAPS = {
+        'Matplotlib - viridis': 'viridis',
+        'Matplotlib - plasma': 'plasma',
+        'Matplotlib - inferno': 'inferno'
+    }
 
 
 class OceanAnalysisGUI(tk.Tk):
@@ -55,7 +82,7 @@ class OceanAnalysisGUI(tk.Tk):
         self.gebco_file = cfg.GEBCO_FILE
         self.output_csv = cfg.OUTPUT_CSV
         self.output_image_dir = cfg.IMAGE_OUT_DIR
-        self.selected_cmap = 'lapaz'
+        self.selected_cmap = None
         self.selected_analysis = tk.StringVar(value='map')
         self.generate_csv = tk.BooleanVar(value=False)
         self.cancel_requested = False
@@ -170,7 +197,7 @@ class OceanAnalysisGUI(tk.Tk):
         
         self.create_io_tab(notebook)
         self.create_parameters_tab(notebook)
-        self.create_visualization_tab(notebook)
+        self.create_color_tab(notebook)
         self.create_data_analysis_tab(notebook)
 
         log_title = tk.Label(main_frame, text='Messages', bg=self.BG_PRIMARY, fg=self.TEXT_PRIMARY, font=('Segoe UI', 10, 'bold'))
@@ -289,9 +316,9 @@ class OceanAnalysisGUI(tk.Tk):
         self.end_month_combo = ttk.Combobox(month_frame, values=[str(i) for i in range(1, 13)], width=5, state='readonly', textvariable=self.month_end_var)
         self.end_month_combo.grid(row=1, column=1, sticky='w', padx=(0, 12))
 
-    def create_visualization_tab(self, notebook):
+    def create_color_tab(self, notebook):
         frame = tk.Frame(notebook, bg=self.BG_PRIMARY)
-        notebook.add(frame, text='Visualization')
+        notebook.add(frame, text='Color')
         inner_frame = tk.Frame(frame, bg=self.BG_PRIMARY)
         inner_frame.pack(fill='both', expand=True, padx=12, pady=12)
 
@@ -311,14 +338,25 @@ class OceanAnalysisGUI(tk.Tk):
         self.cmap_listbox.pack(side='left', fill='both', expand=True, padx=8, pady=8)
         scrollbar.config(command=self.cmap_listbox.yview)
 
-        cmap_names = sorted(CMAPS.keys())
-        for name in cmap_names:
+        # Populate listbox with all available colormaps, showing source prefixes
+        self.cmap_names = sorted(ALL_CMAPS.keys())
+        for name in self.cmap_names:
             self.cmap_listbox.insert(tk.END, name)
 
-        if 'lapaz' in cmap_names:
-            idx = cmap_names.index('lapaz')
+        # Try to select a sensible default: prefer Crameri - lapaz, else first
+        default_name = None
+        if 'Crameri - lapaz' in self.cmap_names:
+            default_name = 'Crameri - lapaz'
+        elif 'Matplotlib - viridis' in self.cmap_names:
+            default_name = 'Matplotlib - viridis'
+        else:
+            default_name = self.cmap_names[0] if self.cmap_names else None
+
+        if default_name:
+            idx = self.cmap_names.index(default_name)
             self.cmap_listbox.selection_set(idx)
             self.cmap_listbox.see(idx)
+            self.selected_cmap = default_name
 
         self.cmap_listbox.bind('<<ListboxSelect>>', self.on_cmap_select)
 
@@ -436,8 +474,7 @@ class OceanAnalysisGUI(tk.Tk):
     def on_cmap_select(self, event):
         selection = self.cmap_listbox.curselection()
         if selection:
-            cmap_names = sorted(CMAPS.keys())
-            self.selected_cmap = cmap_names[selection[0]]
+            self.selected_cmap = self.cmap_names[selection[0]]
             self.update_cmap_preview()
 
     def update_cmap_preview(self):
@@ -449,13 +486,18 @@ class OceanAnalysisGUI(tk.Tk):
             canvas_width = max(self.preview_canvas.winfo_width(), 500)
             height = 60
 
-            cmap_obj = CMAPS.get(self.selected_cmap)
+            cmap_obj = ALL_CMAPS.get(self.selected_cmap)
             if cmap_obj is None:
                 cmap_obj = plt.get_cmap('viridis')
             elif isinstance(cmap_obj, str):
                 cmap_obj = plt.get_cmap(cmap_obj)
-
-            colors = cmap_obj(np.linspace(0, 1, canvas_width))
+            # If cmap_obj is not a Matplotlib Colormap instance but is callable (e.g., Crameri), use it directly
+            try:
+                colors = cmap_obj(np.linspace(0, 1, canvas_width))
+            except Exception:
+                # Fallback: try resolving via matplotlib
+                cmap_obj = plt.get_cmap('viridis')
+                colors = cmap_obj(np.linspace(0, 1, canvas_width))
             img = Image.new('RGB', (canvas_width, height))
             pixels = img.load()
 
@@ -507,10 +549,16 @@ class OceanAnalysisGUI(tk.Tk):
             vmin = np.nanpercentile(elev, 2)
             vmax = np.nanpercentile(elev, 98)
             norm = plt.Normalize(vmin=vmin, vmax=vmax)
-            cmap_obj = CMAPS.get(self.selected_cmap)
+            cmap_obj = ALL_CMAPS.get(self.selected_cmap)
             if cmap_obj is None:
                 cmap_obj = plt.get_cmap('viridis')
-            arr = cmap_obj(norm(elev))
+            elif isinstance(cmap_obj, str):
+                cmap_obj = plt.get_cmap(cmap_obj)
+            try:
+                arr = cmap_obj(norm(elev))
+            except Exception:
+                cmap_obj = plt.get_cmap('viridis')
+                arr = cmap_obj(norm(elev))
 
             img = Image.fromarray((255 * arr).astype('uint8'))
             img = img.transpose(Image.FLIP_TOP_BOTTOM)
