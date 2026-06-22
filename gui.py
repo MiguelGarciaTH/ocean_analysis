@@ -200,23 +200,34 @@ class OceanAnalysisGUI(tk.Tk):
         self.create_color_tab(notebook)
         self.create_data_analysis_tab(notebook)
 
-        log_title = tk.Label(main_frame, text='Messages', bg=self.BG_PRIMARY, fg=self.TEXT_PRIMARY, font=('Segoe UI', 10, 'bold'))
-        log_title.pack(anchor='w', pady=(12, 6))
-        
-        log_frame = tk.Frame(main_frame, bg=self.BG_TERTIARY, highlightthickness=1, highlightbackground=self.BORDER)
-        log_frame.pack(fill='both', expand=True)
+        # Header with collapsible log toggle
+        header_frame = tk.Frame(main_frame, bg=self.BG_PRIMARY)
+        header_frame.pack(fill='x', pady=(12, 6))
 
-        scrollbar = ttk.Scrollbar(log_frame)
+        log_title = tk.Label(header_frame, text='Log', bg=self.BG_PRIMARY, fg=self.TEXT_PRIMARY, font=('Segoe UI', 10, 'bold'))
+        log_title.pack(side='left')
+
+        self.log_toggle_btn = tk.Button(header_frame, text='Show Log', command=self.toggle_log,
+                                        bg=self.BG_TERTIARY, fg=self.TEXT_PRIMARY, font=('Segoe UI', 9),
+                                        border=0, padx=8, pady=4, cursor='hand2')
+        self.log_toggle_btn.pack(side='right')
+
+        # Collapsible log frame (collapsed by default)
+        self.log_frame = tk.Frame(main_frame, bg=self.BG_TERTIARY, highlightthickness=1, highlightbackground=self.BORDER)
+
+        scrollbar = ttk.Scrollbar(self.log_frame)
         scrollbar.pack(side='right', fill='y')
 
         self.log_text = tk.Text(
-            log_frame, height=5, wrap='word', state='disabled',
+            self.log_frame, height=5, wrap='word', state='disabled',
             bg=self.BG_TERTIARY, fg=self.TEXT_PRIMARY, font=('Consolas', 9),
             yscrollcommand=scrollbar.set, insertbackground=self.ACCENT,
             relief='flat', borderwidth=0
         )
         self.log_text.pack(fill='both', expand=True, padx=8, pady=8)
         scrollbar.config(command=self.log_text.yview)
+
+        self.log_visible = False
 
     def create_io_tab(self, notebook):
         frame = tk.Frame(notebook, bg=self.BG_PRIMARY)
@@ -459,6 +470,20 @@ class OceanAnalysisGUI(tk.Tk):
         self.section_canvas.bind('<Control-B1-Motion>', self.on_pan_motion)
 
         self.set_analysis_type('map')
+
+    def toggle_log(self):
+        """Show or hide the log console."""
+        if getattr(self, 'log_visible', False):
+            try:
+                self.log_frame.pack_forget()
+            except Exception:
+                pass
+            self.log_toggle_btn.config(text='Show Log')
+            self.log_visible = False
+        else:
+            self.log_frame.pack(fill='both', expand=True)
+            self.log_toggle_btn.config(text='Hide Log')
+            self.log_visible = True
 
     def set_analysis_type(self, type_str):
         self.selected_analysis.set(type_str)
