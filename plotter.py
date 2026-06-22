@@ -108,7 +108,7 @@ def create_velocity_plot(ds_currents, ds_bottom, lon_bathy, lat_bathy, elevation
     m1 = ds_currents['magn'].values[::step, ::step]
     c1 = get_contrasting_colors(m1)
     
-    ax.quiver(lon[::step], lat[::step], u1, v1, color=c1, scale=25)
+    ax.quiver(lon[::step], lat[::step], u1, v1, color=c1, scale=12, width=0.002)
     
     fig.colorbar(pcm, ax=ax, label='Magnitude (m/s)')
     ax.set_title('Current velocity magnitude (m/s)')
@@ -125,7 +125,7 @@ def create_velocity_plot(ds_currents, ds_bottom, lon_bathy, lat_bathy, elevation
     m2 = ds_bottom['magn'].values[::step, ::step]
     c2 = get_contrasting_colors(m2)
     
-    ax.quiver(lon[::step], lat[::step], u2, v2, color=c2, scale=25)
+    ax.quiver(lon[::step], lat[::step], u2, v2, color=c2, scale=12, width=0.002)
     
     fig.colorbar(pcm, ax=ax, label='Magnitude (m/s)')
     ax.set_title('Bottom velocity magnitude (m/s)')

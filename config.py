@@ -27,4 +27,4 @@ MONTH_START = 1     # Start month for averaging (1 = January)
 MONTH_END = 12      # End month for averaging (12 = December)
 
 # Plotting parameters
-SPATIAL_STEP = 3    # Step size for quiver arrows to prevent overcrowding
+SPATIAL_STEP = 3    # Step size for quiver arrows to prevent overcrowding (1=max density, 2=balanced, 3=sparse)
