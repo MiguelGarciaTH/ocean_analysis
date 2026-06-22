@@ -11,12 +11,34 @@ except ImportError:
 
 def get_safe_cmap(cmap_name):
     """Obtém o colormap de forma segura, adicionando o prefixo cmc. se necessário."""
+    # Accept prefixed names from GUI like "Matplotlib - viridis" or "Crameri - lapaz"
     try:
+        if isinstance(cmap_name, str) and cmap_name.startswith('Matplotlib - '):
+            base = cmap_name.split('Matplotlib - ', 1)[1].strip()
+            return plt.get_cmap(base)
+        if isinstance(cmap_name, str) and cmap_name.startswith('Crameri - '):
+            base = cmap_name.split('Crameri - ', 1)[1].strip()
+            # Try matplotlib cmc.<name> first
+            try:
+                return plt.get_cmap(f'cmc.{base}')
+            except Exception:
+                # Fall back to cmcrameri if installed
+                try:
+                    import cmcrameri
+                    cm = getattr(cmcrameri, base)
+                    return cm
+                except Exception:
+                    return plt.get_cmap('viridis')
+
+        # Try direct lookup (callable or matplotlib name)
+        if not isinstance(cmap_name, str):
+            return cmap_name
         return plt.get_cmap(cmap_name)
-    except ValueError:
+    except Exception:
+        # Last-resort fallback
         try:
             return plt.get_cmap(f'cmc.{cmap_name}')
-        except ValueError:
+        except Exception:
             return plt.get_cmap('viridis')
 
 # Colormap padrão para a Análise de Mapa
@@ -24,27 +46,28 @@ DEFAULT_CMAP = get_safe_cmap('lapaz')
 
 def create_bathymetry_plot(lon_bathy, lat_bathy, elevation, bottom_depth, depth_down_matrix, extent, out_dir,
                            month_start=None, month_end=None, depth_shallow_m=None, depth_deep_m=None,
-                           analysis_type=None):
+                           analysis_type=None, cmap_name='lapaz'):
     """Replicates Figure 1: Bathymetry and Depth analysis."""
     fig, axes = plt.subplots(1, 3, figsize=(18, 6))
     levels = [-5000, -2000, -200, 0]
     
+    cmap = get_safe_cmap(cmap_name)
     ax = axes[0]
-    pcm = ax.pcolormesh(lon_bathy, lat_bathy, elevation, shading='auto', cmap=DEFAULT_CMAP)
+    pcm = ax.pcolormesh(lon_bathy, lat_bathy, elevation, shading='auto', cmap=cmap)
     ax.contour(lon_bathy, lat_bathy, elevation, levels, colors='k', linewidths=0.5)
     fig.colorbar(pcm, ax=ax)
     ax.set_title('Bathymetry in the area')
     ax.axis(extent)
     
     ax = axes[1]
-    pcm = ax.pcolormesh(bottom_depth.longitude, bottom_depth.latitude, -depth_down_matrix, shading='auto', cmap=DEFAULT_CMAP)
+    pcm = ax.pcolormesh(bottom_depth.longitude, bottom_depth.latitude, -depth_down_matrix, shading='auto', cmap=cmap)
     ax.contour(lon_bathy, lat_bathy, elevation, levels, colors='k', linewidths=0.5)
     fig.colorbar(pcm, ax=ax)
     ax.set_title('Depth: lowest layer current analysis')
     ax.axis(extent)
 
     ax = axes[2]
-    pcm = ax.pcolormesh(bottom_depth.longitude, bottom_depth.latitude, -bottom_depth, shading='auto', cmap=DEFAULT_CMAP)
+    pcm = ax.pcolormesh(bottom_depth.longitude, bottom_depth.latitude, -bottom_depth, shading='auto', cmap=cmap)
     ax.contour(lon_bathy, lat_bathy, elevation, levels, colors='k', linewidths=0.5)
     fig.colorbar(pcm, ax=ax)
     ax.set_title('Depth: lowest layer bottom current')
@@ -78,7 +101,7 @@ def create_bathymetry_plot(lon_bathy, lat_bathy, elevation, bottom_depth, depth_
 
 def create_velocity_plot(ds_currents, ds_bottom, lon_bathy, lat_bathy, elevation, extent, step, filename, out_dir,
                          vmax=0.55, month_start=None, month_end=None, depth_shallow_m=None,
-                         depth_deep_m=None, analysis_type=None):
+                         depth_deep_m=None, analysis_type=None, cmap_name='lapaz'):
     """Replicates Figures 2 & 3: Quiver and magnitude plots for currents."""
     fig, axes = plt.subplots(1, 2, figsize=(14, 6))
     
@@ -86,12 +109,14 @@ def create_velocity_plot(ds_currents, ds_bottom, lon_bathy, lat_bathy, elevation
     lat = ds_currents.latitude.values
     levels = [-5000, -2000, -200, 0]
 
+    cmap = get_safe_cmap(cmap_name)
+
     def get_contrasting_colors(magnitudes):
         """Calculates luminance of the colormap to return white or black arrow colors."""
         # Normalize magnitudes to 0-1 range, handling NaNs
         norm_mag = np.clip(np.nan_to_num(magnitudes, nan=0) / vmax, 0, 1)
         # Evaluate the colormap to get RGBA values
-        rgba = DEFAULT_CMAP(norm_mag)
+        rgba = cmap(norm_mag)
         # Calculate relative perceived luminance 
         luminance = 0.299 * rgba[..., 0] + 0.587 * rgba[..., 1] + 0.114 * rgba[..., 2]
         # Use white for dark backgrounds (< 0.5) and black for light ones
@@ -99,7 +124,7 @@ def create_velocity_plot(ds_currents, ds_bottom, lon_bathy, lat_bathy, elevation
         return colors.flatten()
 
     ax = axes[0]
-    pcm = ax.pcolormesh(lon, lat, ds_currents['magn'].values, shading='auto', cmap=DEFAULT_CMAP, vmin=0, vmax=vmax)
+    pcm = ax.pcolormesh(lon, lat, ds_currents['magn'].values, shading='auto', cmap=cmap, vmin=0, vmax=vmax)
     ax.contour(lon_bathy, lat_bathy, elevation, levels, colors='k', linewidths=0.5)
     
     # Extract subset of data for quiver
@@ -117,7 +142,7 @@ def create_velocity_plot(ds_currents, ds_bottom, lon_bathy, lat_bathy, elevation
     ax.axis(extent)
 
     ax = axes[1]
-    pcm = ax.pcolormesh(lon, lat, ds_bottom['magn'].values, shading='auto', cmap=DEFAULT_CMAP, vmin=0, vmax=vmax)
+    pcm = ax.pcolormesh(lon, lat, ds_bottom['magn'].values, shading='auto', cmap=cmap, vmin=0, vmax=vmax)
     ax.contour(lon_bathy, lat_bathy, elevation, levels, colors='k', linewidths=0.5)
     
     u2 = ds_bottom['uo'].values[::step, ::step]

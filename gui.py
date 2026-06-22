@@ -6,7 +6,7 @@ import sys
 import threading
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk, font as tkfont
-from PIL import Image, ImageDraw
+from PIL import Image, ImageDraw, ImageTk
 
 import config as cfg
 from data_processor import OceanDataProcessor
@@ -336,45 +336,183 @@ class OceanAnalysisGUI(tk.Tk):
         tk.Label(inner_frame, text='Color Scheme', bg=self.BG_PRIMARY, fg=self.TEXT_PRIMARY, font=('Segoe UI', 11, 'bold')).pack(anchor='w', pady=(0, 10))
         tk.Label(inner_frame, text='Select colormap:', bg=self.BG_PRIMARY, fg=self.TEXT_SECONDARY, font=('Segoe UI', 9)).pack(anchor='w', pady=(0, 8))
 
+        # Search box to filter palettes (placed above the list)
+        search_frame = tk.Frame(inner_frame, bg=self.BG_TERTIARY)
+        search_frame.pack(fill='x', padx=6, pady=(0,6))
+        tk.Label(search_frame, text='Search:', bg=self.BG_TERTIARY, fg=self.TEXT_SECONDARY, font=('Segoe UI', 9)).pack(side='left')
+        self.search_var = tk.StringVar(value='')
+        search_entry = tk.Entry(search_frame, textvariable=self.search_var, bg=self.BG_PRIMARY, fg=self.TEXT_PRIMARY, relief='flat')
+        search_entry.pack(side='left', fill='x', expand=True, padx=(6,0))
+
+        # Scrollable palette list with inline preview and radio selection
         cmap_list_frame = tk.Frame(inner_frame, bg=self.BG_TERTIARY, highlightthickness=1, highlightbackground=self.BORDER)
         cmap_list_frame.pack(fill='both', expand=True, pady=(0, 15))
 
-        scrollbar = ttk.Scrollbar(cmap_list_frame)
-        scrollbar.pack(side='right', fill='y')
+        # Canvas + inner frame to allow arbitrary widget entries with scrollbar
+        list_canvas = tk.Canvas(cmap_list_frame, bg=self.BG_TERTIARY, highlightthickness=0)
+        list_scroll = ttk.Scrollbar(cmap_list_frame, orient='vertical', command=list_canvas.yview)
+        list_canvas.pack(side='left', fill='both', expand=True)
+        list_scroll.pack(side='right', fill='y')
 
-        self.cmap_listbox = tk.Listbox(
-            cmap_list_frame, height=8, bg=self.BG_TERTIARY, fg=self.TEXT_PRIMARY,
-            selectbackground=self.ACCENT, yscrollcommand=scrollbar.set, relief='flat', borderwidth=0, highlightthickness=0
-        )
-        self.cmap_listbox.pack(side='left', fill='both', expand=True, padx=8, pady=8)
-        scrollbar.config(command=self.cmap_listbox.yview)
+        inner_list = tk.Frame(list_canvas, bg=self.BG_TERTIARY)
+        list_canvas.create_window((0, 0), window=inner_list, anchor='nw')
+        list_canvas.configure(yscrollcommand=list_scroll.set)
 
-        # Populate listbox with all available colormaps, showing source prefixes
         self.cmap_names = sorted(ALL_CMAPS.keys())
-        for name in self.cmap_names:
-            self.cmap_listbox.insert(tk.END, name)
 
-        # Try to select a sensible default: prefer Crameri - lapaz, else first
+        # Radio button variable to hold selected colormap name
+        self.cmap_radio_var = tk.StringVar(value='')
+
+        import numpy as _np
+        import matplotlib.pyplot as _plt
+
+        def _make_gradient(cmap_obj, width=300, height=24):
+            try:
+                colors = cmap_obj(_np.linspace(0, 1, width))
+            except Exception:
+                try:
+                    colors = _plt.get_cmap('viridis')(_np.linspace(0, 1, width))
+                except Exception:
+                    colors = _np.tile([0.5, 0.5, 0.5, 1.0], (width, 1))
+            img = Image.new('RGB', (width, height))
+            px = img.load()
+            for x in range(width):
+                r, g, b = [int(255 * v) for v in colors[x][:3]]
+                for y in range(height):
+                    px[x, y] = (r, g, b)
+            return img
+
+        # Determine default selection
         default_name = None
         if 'Crameri - lapaz' in self.cmap_names:
             default_name = 'Crameri - lapaz'
         elif 'Matplotlib - viridis' in self.cmap_names:
             default_name = 'Matplotlib - viridis'
-        else:
-            default_name = self.cmap_names[0] if self.cmap_names else None
+        elif self.cmap_names:
+            default_name = self.cmap_names[0]
 
+        # Store entry widgets for filtering
+        self._cmap_entries = {}
+        for name in self.cmap_names:
+            entry = tk.Frame(inner_list, bg=self.BG_TERTIARY)
+            entry.pack(fill='x', padx=6, pady=6)
+
+            label = tk.Label(entry, text=name, bg=self.BG_TERTIARY, fg=self.TEXT_PRIMARY, font=('Segoe UI', 9, 'bold'))
+            label.pack(anchor='w')
+
+            # resolve cmap object for preview
+            cmap_obj = ALL_CMAPS.get(name)
+            if isinstance(cmap_obj, str):
+                try:
+                    cmap_obj = _plt.get_cmap(cmap_obj)
+                except Exception:
+                    cmap_obj = _plt.get_cmap('viridis')
+
+            # temporary placeholder image; will be regenerated to fit width below
+            img = _make_gradient(cmap_obj, width=300)
+            photo = ImageTk.PhotoImage(img)
+            sw = tk.Label(entry, image=photo, bg=self.BG_TERTIARY)
+            sw.image = photo
+            sw.pack(fill='x', pady=(4, 2))
+
+            rb = tk.Radiobutton(entry, variable=self.cmap_radio_var, value=name, text='Select', command=lambda n=name: self._on_cmap_radio(n),
+                                bg=self.BG_TERTIARY, fg=self.TEXT_PRIMARY, selectcolor=self.BG_TERTIARY, activebackground=self.BG_TERTIARY)
+            rb.pack(anchor='e')
+
+            self._cmap_entries[name] = (entry, sw, rb, cmap_obj)
+
+        # configure scroll region and regenerate gradient images to fill available width
+        inner_list.update_idletasks()
+        list_canvas.configure(scrollregion=list_canvas.bbox('all'))
+        # Regenerate gradient images to fit the current canvas width when layout stabilizes and on resize
+        def _regenerate_gradients(width=None):
+            w = width or list_canvas.winfo_width() or 400
+            w = max(200, w - 40)
+            for name, (entry, sw, rb, cmap_obj) in self._cmap_entries.items():
+                try:
+                    img = _make_gradient(cmap_obj, width=w)
+                    photo = ImageTk.PhotoImage(img)
+                    sw.configure(image=photo)
+                    sw.image = photo
+                except Exception:
+                    pass
+
+        # initial generation
+        _regenerate_gradients()
+
+        # regenerate on canvas resize
+        def _on_canvas_configure(event):
+            _regenerate_gradients(width=event.width)
+            inner_list.update_idletasks()
+            list_canvas.configure(scrollregion=list_canvas.bbox('all'))
+
+        list_canvas.bind('<Configure>', _on_canvas_configure)
+
+        # set default
         if default_name:
-            idx = self.cmap_names.index(default_name)
-            self.cmap_listbox.selection_set(idx)
-            self.cmap_listbox.see(idx)
+            self.cmap_radio_var.set(default_name)
             self.selected_cmap = default_name
+        else:
+            self.selected_cmap = None
 
-        self.cmap_listbox.bind('<<ListboxSelect>>', self.on_cmap_select)
+        # Filter handling
+        def _filter_cmaps(event=None):
+            q = self.search_var.get().strip().lower()
+            # Build list of names to show in canonical order
+            if not q:
+                names_to_show = list(self.cmap_names)
+            else:
+                names_to_show = [n for n in self.cmap_names if q in n.lower()]
 
-        tk.Label(inner_frame, text='Preview', bg=self.BG_PRIMARY, fg=self.TEXT_PRIMARY, font=('Segoe UI', 11, 'bold')).pack(anchor='w', pady=(0, 8))
-        self.preview_canvas = tk.Canvas(inner_frame, width=500, height=60, bg=self.BG_TERTIARY, highlightthickness=1, highlightbackground=self.BORDER)
-        self.preview_canvas.pack(fill='x')
-        self.update_cmap_preview()
+            # First hide all entries
+            for name, (entry, sw, rb, cmap_obj) in self._cmap_entries.items():
+                if entry.winfo_ismapped():
+                    entry.pack_forget()
+
+            # Then repack only the matching entries in canonical order
+            for name in names_to_show:
+                entry, sw, rb, cmap_obj = self._cmap_entries.get(name)
+                entry.pack(fill='x', padx=6, pady=6)
+
+            inner_list.update_idletasks()
+            list_canvas.configure(scrollregion=list_canvas.bbox('all'))
+
+        self.search_var.trace_add('write', lambda *a: _filter_cmaps())
+
+        # Mouse wheel scrolling when cursor over canvas
+        def _on_mousewheel(event):
+            if event.num == 4:
+                list_canvas.yview_scroll(-1, 'units')
+            elif event.num == 5:
+                list_canvas.yview_scroll(1, 'units')
+            else:
+                delta = int(-1 * (event.delta / 120))
+                list_canvas.yview_scroll(delta, 'units')
+
+        # Bind wheel events globally while the pointer is over the palette area so child widgets don't steal events.
+        def _bind_all_wheel():
+            list_canvas.bind_all('<MouseWheel>', _on_mousewheel)
+            list_canvas.bind_all('<Button-4>', _on_mousewheel)
+            list_canvas.bind_all('<Button-5>', _on_mousewheel)
+
+        def _unbind_all_wheel():
+            try:
+                list_canvas.unbind_all('<MouseWheel>')
+            except Exception:
+                pass
+            try:
+                list_canvas.unbind_all('<Button-4>')
+            except Exception:
+                pass
+            try:
+                list_canvas.unbind_all('<Button-5>')
+            except Exception:
+                pass
+
+        # Bind enter/leave on the outer frame, canvas and inner list so we capture pointer over any child.
+        for widget in (cmap_list_frame, list_canvas, inner_list):
+            widget.bind('<Enter>', lambda e: _bind_all_wheel())
+            widget.bind('<Leave>', lambda e: _unbind_all_wheel())
 
     def create_data_analysis_tab(self, notebook):
         frame = tk.Frame(notebook, bg=self.BG_PRIMARY)
@@ -484,6 +622,11 @@ class OceanAnalysisGUI(tk.Tk):
             self.log_frame.pack(fill='both', expand=True)
             self.log_toggle_btn.config(text='Hide Log')
             self.log_visible = True
+
+    def _on_cmap_radio(self, name):
+        """Handler when a palette radio button is clicked."""
+        self.selected_cmap = name
+        logger.info(f'Color selection: {name}')
 
     def set_analysis_type(self, type_str):
         self.selected_analysis.set(type_str)
@@ -1106,7 +1249,7 @@ class OceanAnalysisGUI(tk.Tk):
             extent, config['output_image_dir'],
             month_start=config['month_start'], month_end=config['month_end'],
             depth_shallow_m=config['depth_up'], depth_deep_m=config['depth_down'],
-            analysis_type='bathymetry_depths'
+            analysis_type='bathymetry_depths', cmap_name=self.selected_cmap
         )
 
         self.check_cancel()
@@ -1119,7 +1262,7 @@ class OceanAnalysisGUI(tk.Tk):
             extent, cfg.SPATIAL_STEP, 'fig2_mean_velocity.png', config['output_image_dir'],
             month_start=config['month_start'], month_end=config['month_end'],
             depth_shallow_m=config['depth_up'], depth_deep_m=config['depth_down'],
-            analysis_type='mean_velocity'
+            analysis_type='mean_velocity', cmap_name=self.selected_cmap
         )
 
         self.check_cancel()
