@@ -132,8 +132,36 @@ def create_velocity_plot(ds_currents, ds_bottom, lon_bathy, lat_bathy, elevation
     v1 = ds_currents['vo'].values[::step, ::step]
     m1 = ds_currents['magn'].values[::step, ::step]
     c1 = get_contrasting_colors(m1)
-    
-    ax.quiver(lon[::step], lat[::step], u1, v1, color=c1, scale=12, width=0.002)
+
+    # Compute adaptive quiver scale but keep it in the default quiver units (points)
+    # so we don't mix degrees (lon/lat) with m/s. Clamp to a sensible range.
+    try:
+        max_mag_surf = float(np.nanmax(ds_currents['magn'].values)) if np.any(~np.isnan(ds_currents['magn'].values)) else 0.0
+    except Exception:
+        max_mag_surf = 0.0
+
+    # Baseline scale (matches previous tuning). Smaller scale -> longer arrows.
+    base_scale = 12.0
+    # Adjust scale modestly according to vmax: if vmax is small, reduce scale so arrows aren't huge.
+    if max_mag_surf > 0:
+        quiver_scale_surf = base_scale * (0.5 + vmax / (max_mag_surf + 1e-12))
+    else:
+        quiver_scale_surf = base_scale
+
+    # Clamp to avoid zero or extreme values
+    quiver_scale_surf = float(np.clip(quiver_scale_surf, 3.0, 120.0))
+
+    # Draw arrows using Matplotlib's quiver but request edge colors so arrows have a clean border.
+    # Use a single quiver call; set linewidths/edgecolors to produce a visible borderline.
+    try:
+        ax.quiver(lon[::step], lat[::step], u1, v1,
+                  color='black', edgecolors='white', linewidths=0.4,
+                  scale=quiver_scale_surf, zorder=4)
+    except Exception:
+        # Some Matplotlib versions expect 'edgecolor' keyword
+        ax.quiver(lon[::step], lat[::step], u1, v1,
+                  color='black', edgecolor='white', linewidths=0.4,
+                  scale=quiver_scale_surf, zorder=4)
     
     fig.colorbar(pcm, ax=ax, label='Magnitude (m/s)')
     ax.set_title('Current velocity magnitude (m/s)')
@@ -149,8 +177,26 @@ def create_velocity_plot(ds_currents, ds_bottom, lon_bathy, lat_bathy, elevation
     v2 = ds_bottom['vo'].values[::step, ::step]
     m2 = ds_bottom['magn'].values[::step, ::step]
     c2 = get_contrasting_colors(m2)
-    
-    ax.quiver(lon[::step], lat[::step], u2, v2, color=c2, scale=12, width=0.002)
+
+    try:
+        max_mag_bot = float(np.nanmax(ds_bottom['magn'].values)) if np.any(~np.isnan(ds_bottom['magn'].values)) else 0.0
+    except Exception:
+        max_mag_bot = 0.0
+
+    if max_mag_bot > 0:
+        quiver_scale_bot = base_scale * (0.5 + vmax / (max_mag_bot + 1e-12))
+    else:
+        quiver_scale_bot = base_scale
+    quiver_scale_bot = float(np.clip(quiver_scale_bot, 3.0, 120.0))
+
+    try:
+        ax.quiver(lon[::step], lat[::step], u2, v2,
+                  color='black', edgecolors='white', linewidths=0.4,
+                  scale=quiver_scale_bot, zorder=4)
+    except Exception:
+        ax.quiver(lon[::step], lat[::step], u2, v2,
+                  color='black', edgecolor='white', linewidths=0.4,
+                  scale=quiver_scale_bot, zorder=4)
     
     fig.colorbar(pcm, ax=ax, label='Magnitude (m/s)')
     ax.set_title('Bottom velocity magnitude (m/s)')
@@ -169,10 +215,26 @@ def create_velocity_plot(ds_currents, ds_bottom, lon_bathy, lat_bathy, elevation
         meta_lines.append(f'Depths (m below surface): {ds_shallow} to {ds_deep}')
     if analysis_type:
         meta_lines.append(f'Analysis: {analysis_type}')
+    # Add max velocity values to metadata
+    try:
+        meta_lines.append(f'Max surface mag: {max_mag_surf:.3f} m/s')
+    except Exception:
+        pass
+    try:
+        meta_lines.append(f'Max bottom mag: {max_mag_bot:.3f} m/s')
+    except Exception:
+        pass
     if meta_lines:
         meta_text = '\n'.join(meta_lines)
-        fig.text(0.02, 0.02, meta_text, ha='left', va='bottom', fontsize=7, color='gray',
-                 bbox=dict(facecolor='white', alpha=0.5, edgecolor='none'))
+        # Place metadata inside the left axis (top-left corner) so it uses plot empty space
+        try:
+            axes[0].text(0.02, 0.98, meta_text, transform=axes[0].transAxes,
+                         ha='left', va='top', fontsize=8, color='gray',
+                         bbox=dict(facecolor='white', alpha=0.6, edgecolor='none'))
+        except Exception:
+            # Fallback to figure text if axes not present
+            fig.text(0.02, 0.98, meta_text, ha='left', va='top', fontsize=8, color='gray',
+                     bbox=dict(facecolor='white', alpha=0.6, edgecolor='none'))
 
     # Build a clear, human-readable filename for velocity outputs
     if month_start is not None and month_end is not None and depth_shallow_m is not None and depth_deep_m is not None:
